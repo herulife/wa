@@ -1,4 +1,4 @@
-const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
+const { Client, LocalAuth } = require("whatsapp-web.js");
 const express = require("express");
 const qrcode = require("qrcode-terminal");
 const bodyParser = require("body-parser");
@@ -8,30 +8,26 @@ const mime = require("mime-types");
 const app = express();
 app.use(bodyParser.json());
 
-// Inisialisasi client WhatsApp
 const client = new Client({
   authStrategy: new LocalAuth(),
   puppeteer: {
-    args: ["--no-sandbox"], // wajib kalau di Railway
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
   },
 });
 
-// Tampilkan QR code di terminal saat pertama kali
 client.on("qr", (qr) => {
   qrcode.generate(qr, { small: true });
+  console.log("🔒 Scan QR code to login");
 });
 
-// Jika berhasil login
 client.on("ready", () => {
   console.log("✅ WhatsApp is ready!");
 });
 
-// Mulai koneksi WhatsApp
 client.initialize();
 
-// ===============================
-// Endpoint: Kirim Pesan Teks
-// ===============================
+// Kirim pesan teks
 app.post("/send", async (req, res) => {
   const { number, message } = req.body;
   const chatId = number + "@c.us";
@@ -44,40 +40,28 @@ app.post("/send", async (req, res) => {
   }
 });
 
-// ===============================
-// Endpoint: Kirim Media dari URL
-// ===============================
+// Kirim pesan media
 app.post("/send-media", async (req, res) => {
   const { number, fileUrl, caption } = req.body;
   const chatId = number + "@c.us";
 
   try {
-    const response = await axios.get(fileUrl, {
-      responseType: "arraybuffer",
-    });
+    const response = await axios.get(fileUrl, { responseType: "arraybuffer" });
+    const mimetype = response.headers["content-type"] || mime.lookup(fileUrl);
 
-    const mimeType = response.headers["content-type"];
-    const extension = mime.extension(mimeType);
-
-    const media = new MessageMedia(
-      mimeType,
-      Buffer.from(response.data).toString("base64"),
-      "file." + extension
+    const media = new (require("whatsapp-web.js").MessageMedia)(
+      mimetype,
+      Buffer.from(response.data, "binary").toString("base64"),
+      "media"
     );
 
-    await client.sendMessage(chatId, media, {
-      caption: caption || "",
-    });
-
+    await client.sendMessage(chatId, media, { caption });
     res.send({ status: "sent", number });
   } catch (err) {
     res.status(500).send({ error: err.message });
   }
 });
 
-// ===============================
-// Jalankan server Express
-// ===============================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
